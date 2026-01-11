@@ -1,5 +1,7 @@
 # Medical Private Record - Confidential Computing on Solana with Arcium
 
+![Private Data Confidential Computing](assets/private_data.png)
+
 A Solana-based application leveraging **Arcium's confidential computing network** to enable secure, privacy-preserving storage and sharing of sensitive medical records. This project demonstrates how blockchain technology, combined with multi-party computation (MPC), can facilitate secure data processing while maintaining strict privacy guarantees.
 
 ## Overview
