@@ -1,4 +1,4 @@
-# Medical Private Record - Confidential Computing on Solana with Arcium
+# Confidential Computing on Solana with Arcium - Secure Private Data Management
 
 ![Private Data Confidential Computing](assets/private_data.png)
 
