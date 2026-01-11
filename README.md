@@ -126,7 +126,6 @@ This project follows a structure similar to a standard Solana Anchor project, wi
 - 🔐 **End-to-End Encryption**: Data remains encrypted from storage through computation
 - 🏥 **Medical Record Management**: Store and retrieve patient medical information securely
 - 🔍 **Privacy-Preserving Queries**: Look up records without exposing sensitive data
-- ✅ **HIPAA Compliant Architecture**: Designed with healthcare privacy regulations in mind
 - 🔗 **Blockchain Transparency**: All transactions are verifiable on-chain while data remains private
 - ⚡ **Scalable**: Leverages Arcium's parallelized network for high performance
 
