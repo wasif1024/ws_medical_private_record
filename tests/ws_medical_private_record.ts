@@ -67,103 +67,169 @@ describe("WsMedicalPrivateRecord", () => {
   const clusterAccount = getClusterAccount();
 
   it("Is initialized!", async () => {
-    const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+    const owner = readKpJson(`/Users/air/.config/solana/local.json`);
 
     console.log("Initializing add together computation definition");
-    const initATSig = await initAddTogetherCompDef(
-      program,
-      owner,
-      false,
-      false,
-    );
-    console.log(
-      "Add together computation definition initialized with signature",
-      initATSig,
-    );
-
+   
     const mxePublicKey = await getMXEPublicKeyWithRetry(
       provider as anchor.AnchorProvider,
       program.programId,
     );
 
     console.log("MXE x25519 pubkey is", mxePublicKey);
-
-    const privateKey = x25519.utils.randomSecretKey();
-    const publicKey = x25519.getPublicKey(privateKey);
-
-    const sharedSecret = x25519.getSharedSecret(privateKey, mxePublicKey);
+    console.log("Initializing Private Record Lookup computation definition");
+    const initPRDSig = await initPrivateRecordLookupCompDef(
+      program,
+      owner,
+      false,
+      false
+    );
+    console.log(
+      "Private record lookup computation definition initialized with signature",
+      initPRDSig
+    );
+    const senderPrivateKey = x25519.utils.randomSecretKey();
+    const senderPublicKey = x25519.getPublicKey(senderPrivateKey);
+    const sharedSecret = x25519.getSharedSecret(senderPrivateKey, mxePublicKey);
     const cipher = new RescueCipher(sharedSecret);
-
-    const val1 = BigInt(1);
-    const val2 = BigInt(2);
-    const plaintext = [val1, val2];
-
+    const patientId = BigInt(430);
+    const age = BigInt(70);
+    const gender = BigInt(true);
+    const bloodType = BigInt(1); // A+
+    const weight = BigInt(75);
+    const height = BigInt(175);
+    // allergies are [peanuts, latex, bees, wasps, cats]
+    const allergies = [
+      BigInt(true),
+      BigInt(false),
+      BigInt(false),
+      BigInt(true),
+      BigInt(true),
+    ];
+    const patientData = [
+      patientId,
+      age,
+      gender,
+      bloodType,
+      weight,
+      height,
+      ...allergies,
+    ];
     const nonce = randomBytes(16);
-    const ciphertext = cipher.encrypt(plaintext, nonce);
-
-    const sumEventPromise = awaitEvent("sumEvent");
+    const ciphertext = cipher.encrypt(patientData, nonce);
+    const storeSig = await program.methods
+      .storePatientData(
+        ciphertext[0],
+        ciphertext[1],
+        ciphertext[2],
+        ciphertext[3],
+        ciphertext[4],
+        ciphertext[5],
+        [
+          ciphertext[6],
+          ciphertext[7],
+          ciphertext[8],
+          ciphertext[9],
+          ciphertext[10],
+        ]
+      )
+      .rpc({ commitment: "confirmed", preflightCommitment: "confirmed" });
+    console.log("Store sig is ", storeSig);
+    const receiverSecretKey = x25519.utils.randomSecretKey();
+    const receiverPubKey = x25519.getPublicKey(receiverSecretKey);
+    const receiverNonce = randomBytes(16);
+    const receivedPrivateRecordLookupEventPromise = awaitEvent(
+      "receivedPrivateRecordLookupEvent"
+    );
     const computationOffset = new anchor.BN(randomBytes(8), "hex");
-
     const queueSig = await program.methods
-      .addTogether(
+      .privateRecordLookup(
         computationOffset,
-        Array.from(ciphertext[0]),
-        Array.from(ciphertext[1]),
-        Array.from(publicKey),
-        new anchor.BN(deserializeLE(nonce).toString()),
+        Array.from(receiverPubKey),
+        new anchor.BN(deserializeLE(receiverNonce).toString()),
+        Array.from(senderPublicKey),
+        new anchor.BN(deserializeLE(nonce).toString())
       )
       .accountsPartial({
         computationAccount: getComputationAccAddress(
-          arciumEnv.arciumClusterOffset,
-          computationOffset,
+          getArciumEnv().arciumClusterOffset,
+          computationOffset
         ),
-        clusterAccount,
+        clusterAccount: clusterAccount,
         mxeAccount: getMXEAccAddress(program.programId),
-        mempoolAccount: getMempoolAccAddress(arciumEnv.arciumClusterOffset),
-        executingPool: getExecutingPoolAccAddress(
-          arciumEnv.arciumClusterOffset,
-        ),
+        mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+        executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
         compDefAccount: getCompDefAccAddress(
           program.programId,
-          Buffer.from(getCompDefAccOffset("add_together")).readUInt32LE(),
+          Buffer.from(getCompDefAccOffset("share_patient_data")).readUInt32LE()
         ),
+        patientData: PublicKey.findProgramAddressSync(
+          [Buffer.from("patient_data"), owner.publicKey.toBuffer()],
+          program.programId
+        )[0],
       })
-      .rpc({ skipPreflight: true, commitment: "confirmed" });
+      .rpc({ commitment: "confirmed", preflightCommitment: "confirmed" });
     console.log("Queue sig is ", queueSig);
-
     const finalizeSig = await awaitComputationFinalization(
       provider as anchor.AnchorProvider,
       computationOffset,
       program.programId,
-      "confirmed",
+      "confirmed"
     );
     console.log("Finalize sig is ", finalizeSig);
+    const receiverSharedSecret = x25519.getSharedSecret(
+      receiverSecretKey,
+      mxePublicKey
+    );
+    const receiverCipher = new RescueCipher(receiverSharedSecret);
+    const receivedPrivateRecordLookupEvent = await receivedPrivateRecordLookupEventPromise;
+    const decryptedFields = receiverCipher.decrypt(
+      [
+        receivedPrivateRecordLookupEvent.patientId,
+        receivedPrivateRecordLookupEvent.age,
+        receivedPrivateRecordLookupEvent.gender,
+        receivedPrivateRecordLookupEvent.bloodType,
+        receivedPrivateRecordLookupEvent.weight,
+        receivedPrivateRecordLookupEvent.height,
+        ...receivedPrivateRecordLookupEvent.allergies,
+      ],
+      new Uint8Array(receivedPrivateRecordLookupEvent.nonce)
+    );
+    expect(decryptedFields[0]).to.equal(patientData[0], "Patient ID mismatch");
+    expect(decryptedFields[1]).to.equal(patientData[1], "Age mismatch");
+    expect(decryptedFields[2]).to.equal(patientData[2], "Gender mismatch");
+    expect(decryptedFields[3]).to.equal(patientData[3], "Blood type mismatch");
+    expect(decryptedFields[4]).to.equal(patientData[4], "Weight mismatch");
+    expect(decryptedFields[5]).to.equal(patientData[5], "Height mismatch");
+    for (let i = 0; i < 5; i++) {
+      expect(decryptedFields[6 + i]).to.equal(
+        patientData[6 + i],
+        `Allergy ${i} mismatch`
+      );
+    }
 
-    const sumEvent = await sumEventPromise;
-    const decrypted = cipher.decrypt([sumEvent.sum], sumEvent.nonce)[0];
-    expect(decrypted).to.equal(val1 + val2);
+    console.log("All patient data fields successfully decrypted and verified");
   });
-
-  async function initAddTogetherCompDef(
+  async function initPrivateRecordLookupCompDef(
     program: Program<WsMedicalPrivateRecord>,
     owner: anchor.web3.Keypair,
     uploadRawCircuit: boolean,
-    offchainSource: boolean,
+    offchainSource: boolean
   ): Promise<string> {
     const baseSeedCompDefAcc = getArciumAccountBaseSeed(
-      "ComputationDefinitionAccount",
+      "ComputationDefinitionAccount"
     );
-    const offset = getCompDefAccOffset("add_together");
+    const offset = getCompDefAccOffset("private_record_lookup");
 
     const compDefPDA = PublicKey.findProgramAddressSync(
       [baseSeedCompDefAcc, program.programId.toBuffer(), offset],
-      getArciumProgramId(),
+      getArciumProgramId()
     )[0];
 
     console.log("Comp def pda is ", compDefPDA);
 
     const sig = await program.methods
-      .initAddTogetherCompDef()
+      .initPrivateRecordLookupCompDef()
       .accounts({
         compDefAccount: compDefPDA,
         payer: owner.publicKey,
@@ -172,24 +238,28 @@ describe("WsMedicalPrivateRecord", () => {
       .signers([owner])
       .rpc({
         commitment: "confirmed",
+        preflightCommitment: "confirmed",
       });
-    console.log("Init add together computation definition transaction", sig);
+    console.log(
+      "init private record lookup computation definition transaction",
+      sig
+    );
 
     if (uploadRawCircuit) {
-      const rawCircuit = fs.readFileSync("build/add_together.arcis");
+      const rawCircuit = fs.readFileSync("build/private_record_lookup.arcis");
 
       await uploadCircuit(
         provider as anchor.AnchorProvider,
-        "add_together",
+        "private_record_lookup",
         program.programId,
         rawCircuit,
-        true,
+        true
       );
     } else if (!offchainSource) {
       const finalizeTx = await buildFinalizeCompDefTx(
         provider as anchor.AnchorProvider,
         Buffer.from(offset).readUInt32LE(),
-        program.programId,
+        program.programId
       );
 
       const latestBlockhash = await provider.connection.getLatestBlockhash();
